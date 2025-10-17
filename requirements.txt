@@ -46,3 +46,4 @@ xgboost
 lightgbm
 catboost
 tensorflow
+geopy
