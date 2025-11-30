@@ -1,0 +1,31 @@
+//1. Query 1
+MATCH (origin:Airport)<-[:DEPARTS_FROM]-(f:Flight)-[:ARRIVES_AT]->(dest:Airport)
+            RETURN origin.station_code AS origin,
+                   dest.station_code AS destination,
+                   count(f) AS flight_count
+            ORDER BY flight_count DESC, destination ASC
+            LIMIT 5
+//2. Query 2
+MATCH (j:Journey)-[:ON]->(f:Flight)
+            RETURN toInteger(f.flight_number) AS flight_id,
+                   count(j) AS feedback_count
+            ORDER BY feedback_count DESC
+            LIMIT 10
+//3. Query 3
+MATCH (p:Passenger)-[:TOOK]->(j:Journey)
+            WHERE j.number_of_legs > 1
+            RETURN p.generation AS generation,
+                   count(j) AS multi_leg_count,
+                   avg(j.food_satisfaction_score) AS avg_score
+            ORDER BY multi_leg_count DESC
+//4. Query 4
+MATCH (j:Journey)-[:ON]->(f:Flight)
+            RETURN toInteger(f.flight_number) AS flight_id,
+                   avg(j.arrival_delay_minutes) AS avg_arrival_delay
+            ORDER BY avg_arrival_delay ASC
+            LIMIT 10
+//5. Query 5
+MATCH (p:Passenger)-[:TOOK]->(j:Journey)
+            RETURN p.loyalty_program_level AS loyalty_level,
+                   round(avg(j.actual_flown_miles) * 100) / 100 AS avg_actual_flown_miles
+            ORDER BY avg_actual_flown_miles DESC

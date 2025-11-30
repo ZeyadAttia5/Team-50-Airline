@@ -148,6 +148,70 @@ def run_verification_queries(uri, username, password):
     finally:
         driver.close()
         print("\nNeo4j connection closed.")
+        
+def rule(uri, username, password):
+    """
+    Connects to Neo4j and calculates the number of passengers with
+    overall satisfaction score > 3.
+    """
+
+    print("Connecting to Neo4j for Overall Satisfaction Score...")
+    driver = GraphDatabase.driver(uri, auth=(username, password))
+
+    try:
+        with driver.session() as session:
+            query = """
+            MATCH (p:Passenger)-[:TOOK]->(j:Journey)
+            WITH 
+                p,
+                j,
+                j.food_satisfaction_score AS food_score,
+                round(abs(j.arrival_delay_minutes) / 20.0, 1) AS delay_raw,
+                CASE 
+                    WHEN round(abs(j.arrival_delay_minutes) / 20.0, 1) < 0 THEN 0
+                    WHEN round(abs(j.arrival_delay_minutes) / 20.0, 1) > 5 THEN 5
+                    ELSE round(abs(j.arrival_delay_minutes) / 20.0, 1)
+                END AS delay_clamped,
+                round(j.number_of_legs * 1.5, 1) AS legs_raw,
+                CASE 
+                    WHEN round(j.number_of_legs * 1.5, 1) < 0 THEN 0
+                    WHEN round(j.number_of_legs * 1.5, 1) > 5 THEN 5
+                    ELSE round(j.number_of_legs * 1.5, 1)
+                END AS legs_clamped,
+                round(j.actual_flown_miles / 3000.0, 1) AS miles_raw,
+                CASE
+                    WHEN round(j.actual_flown_miles / 3000.0, 1) < 0 THEN 0
+                    WHEN round(j.actual_flown_miles / 3000.0, 1) > 5 THEN 5
+                    ELSE round(j.actual_flown_miles / 3000.0, 1)
+                END AS miles_clamped
+            WITH
+                p,
+                food_score,
+                (5 - delay_clamped) AS delay_score,
+                (5 - legs_clamped) AS legs_score,
+                (5 - miles_clamped) AS miles_score,
+                0.5  * food_score +
+                0.35 * (5 - delay_clamped) +
+                0.1  * (5 - legs_clamped) +
+                0.05 * (5 - miles_clamped) AS overall_satisfaction_score
+            WHERE overall_satisfaction_score > 3
+            RETURN count(p) AS result;
+            """
+
+            result = session.run(query).single()
+            overall_count = result["result"]
+
+            print("\n" + "-"*60)
+            print("Query: Passengers with overall satisfaction > 3")
+            print("-"*60)
+            print(f"{'Count':<10}")
+            print("-"*10)
+            print(f"{overall_count:<10}")
+
+    finally:
+        driver.close()
+        print("\nNeo4j connection closed.")
+
 
 
 def main():
@@ -173,6 +237,8 @@ def main():
     # Run verification queries
     try:
         run_verification_queries(uri, username, password)
+        rule(uri, username, password)
+
     except Exception as e:
         print(f"Error running queries: {e}")
         raise
