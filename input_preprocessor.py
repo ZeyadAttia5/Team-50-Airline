@@ -1,16 +1,37 @@
 import json
-import ollama
+import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    print("Error: 'python-dotenv' is not installed. Please run 'pip install python-dotenv' or activate your virtual environment.")
+
+
+try:
+    from groq import Groq
+except ImportError:
+    print("Error: 'groq' is not installed. Please run 'pip install groq' or activate your virtual environment.")
+    exit(1)
+
 from typing import Dict, Any, Optional
 
 class InputPreprocessor:
-    def __init__(self, model_name: str = "llama3.2:3b"):
+    def __init__(self, model_name: str = "llama-3.3-70b-versatile", api_key: Optional[str] = None):
         """
-        Initialize the InputPreprocessor with an Ollama model.
+        Initialize the InputPreprocessor with a Groq model.
         
         Args:
-            model_name: The name of the Ollama model to use (default: "llama3.2:3b").
+            model_name: The name of the Groq model to use (default: "llama3-8b-8192").
+            api_key: The Groq API key. If None, it will be read from the 'GROQ_API_KEY' environment variable.
         """
         self.model_name = model_name
+        self.api_key = api_key or os.environ.get("GROQ_API_KEY")
+        
+        if not self.api_key:
+            raise ValueError("Groq API Key is required. Set it in the constructor or as 'GROQ_API_KEY' environment variable.")
+        
+        self.client = Groq(api_key=self.api_key)
+        
         self.system_prompt = """
             You are an Input Preprocessing Assistant for a Graph-RAG Airline Travel System.
 
@@ -97,7 +118,7 @@ class InputPreprocessor:
 
     def process_query(self, query: str) -> Dict[str, Any]:
         """
-        Analyzes the user's query to classify intent and extract entities using Ollama.
+        Analyzes the user's query to classify intent and extract entities using Groq.
 
         Args:
             query: The user's input string.
@@ -106,22 +127,28 @@ class InputPreprocessor:
             A dictionary containing the classified intent and extracted entities.
         """
         try:
-            response = ollama.chat(
-                model=self.model_name,
+            chat_completion = self.client.chat.completions.create(
                 messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": query}
+                    {
+                        "role": "system",
+                        "content": self.system_prompt
+                    },
+                    {
+                        "role": "user",
+                        "content": query,
+                    }
                 ],
-                format="json",
-                options={"temperature": 0}
+                model=self.model_name,
+                response_format={"type": "json_object"},
+                temperature=0
             )
             
-            content = response['message']['content']
+            content = chat_completion.choices[0].message.content
             parsed_response = json.loads(content)
             return parsed_response
 
         except Exception as e:
-            print(f"Error processing query with Ollama: {e}")
+            print(f"Error processing query with Groq: {e}")
             return {
                 "intent": "general_query",
                 "entities": {
@@ -136,9 +163,13 @@ class InputPreprocessor:
             }
 
 if __name__ == "__main__":
-    # Example usage with Ollama
-    preprocessor = InputPreprocessor(model_name="llama3.2:3b")
-    query = "What is the cheapest nonstop flight from JFK to LAX tomorrow?"
-    print(f"Processing query: '{query}'")
-    result = preprocessor.process_query(query)
-    print(json.dumps(result, indent=2))
+    # Example usage with Groq
+    # Ensure GROQ_API_KEY is set in your environment
+    try:
+        preprocessor = InputPreprocessor()
+        query = "what are flights from JFK to LAX with minimum delay?"
+        print(f"Processing query: '{query}'")
+        result = preprocessor.process_query(query)
+        print(json.dumps(result, indent=2))
+    except ValueError as e:
+        print(e)
