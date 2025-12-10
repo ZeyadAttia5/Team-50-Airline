@@ -9,15 +9,40 @@ try:
 except ImportError:
     pass
 
+try:
+    from sentence_transformers import SentenceTransformer
+    EMBEDDINGS_AVAILABLE = True
+    print("Loading Sentence Transformer model for retrieval...")
+    # Using Model 1 (all-MiniLM-L6-v2) by default as it's the standard/balanced one
+    # model = SentenceTransformer('all-MiniLM-L6-v2') 
+    model = SentenceTransformer('paraphrase-MiniLM-L3-v2') 
+except ImportError:
+    EMBEDDINGS_AVAILABLE = False
+    print("WARNING: 'sentence_transformers' not installed. Vector search will fail.")
+
 class GraphRetriever:
     """
     Graph Retrieval Layer for Airline Travel Assistant.
-    Implements the first experiment (baseline) of the second requirement.
+    Satisfies Requirement 2:
+    - 2.a: Baseline Rule-based Retrieval (Template Cypher)
+    - 2.b: Semantic Similarity Search (Vector Embeddings)
     """
     def __init__(self):
+        # Read config from file if env vars not set (fallback)
         self.uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
         self.user = os.environ.get("NEO4J_USER", "neo4j")
         self.password = os.environ.get("NEO4J_PASSWORD", "password")
+        
+        # Try reading config.txt if available
+        if os.path.exists("config.txt"):
+            with open("config.txt", "r") as f:
+                for line in f:
+                    if "=" in line:
+                        k, v = line.strip().split("=", 1)
+                        if k == "URI": self.uri = v
+                        elif k == "USERNAME": self.user = v
+                        elif k == "PASSWORD": self.password = v
+
         self.driver = None
         self._connect()
 
@@ -34,10 +59,42 @@ class GraphRetriever:
         if self.driver:
             self.driver.close()
 
+    def vector_search(self, query_text: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        Requirement 2.b: Semantic Similarity Search using Vector Embeddings.
+        Uses 'journey_embeddings_1' index created by Create_kg.py.
+        """
+        if not EMBEDDINGS_AVAILABLE:
+            print("Embeddings not available.")
+            return []
+
+        # 1. Embed query
+        query_vector = model.encode(query_text).tolist()
+        
+        # 2. Run Vector Search
+        cypher = """
+        CALL db.index.vector.queryNodes('journey_embeddings_1', $limit, $embedding)
+        YIELD node, score
+        RETURN node.feedback_ID AS id, 
+               node.text AS description, 
+               node.food_satisfaction_score AS food_rating,
+               node.arrival_delay_minutes AS delay,
+               score
+        """
+        
+        if self.driver:
+            with self.driver.session() as session:
+                result = session.run(cypher, limit=limit, embedding=query_vector)
+                return [record.data() for record in result]
+        return []
+
     def generate_cypher_baseline(self, parsed_input: Dict[str, Any]) -> str:
         """
         Experiment 1 (Baseline): Rule-based mapping from intent/entities to Cypher.
-        Implements library of at least 10 query templates.
+        Updated to match Create_kg.py schema:
+        - Nodes: Flight, Airport, Journey
+        - Relationships: (f)-[:DEPARTS_FROM]->(a), (f)-[:ARRIVES_AT]->(a), (j)-[:ON]->(f)
+        - Properties: Airport.station_code (not code)
         """
         intent = parsed_input.get("intent")
         entities = parsed_input.get("entities", {})
@@ -46,7 +103,9 @@ class GraphRetriever:
         airports = entities.get("airports", {})
         dep_code = airports.get("departure")
         arr_code = airports.get("arrival")
-        dates = entities.get("dates", [])
+        # Note: 'dates' are not supported in current Create_kg.py schema (Flight has no date prop)
+        # We will ignore dates for now or search only by route.
+        
         passengers = entities.get("passengers", [])
         journeys = entities.get("journeys", []) # e.g., "business", "economy"
         attributes = entities.get("attributes", []) # e.g., "cheapest", "fastest"
@@ -59,148 +118,96 @@ class GraphRetriever:
             match_clauses = ["MATCH (f:Flight)"]
             where_clauses = []
             if dep_code:
-                match_clauses.append(f"MATCH (f)-[:ORIGIN]->(origin:Airport {{code: '{dep_code}'}})")
+                match_clauses.append(f"MATCH (f)-[:DEPARTS_FROM]->(origin:Airport {{station_code: '{dep_code}'}})")
             if arr_code:
-                match_clauses.append(f"MATCH (f)-[:DESTINATION]->(dest:Airport {{code: '{arr_code}'}})")
-            if dates:
-                where_clauses.append(f"f.date = '{dates[0]}'")
+                match_clauses.append(f"MATCH (f)-[:ARRIVES_AT]->(dest:Airport {{station_code: '{arr_code}'}})")
             
             query = "\n".join(match_clauses)
             if where_clauses:
                 query += "\nWHERE " + " AND ".join(where_clauses)
-            query += "\nRETURN f, origin, dest LIMIT 10"
+            query += "\nRETURN f.flight_number, f.fleet_type_description LIMIT 10"
 
         # --- 2. Delay Analysis ---
-        # "Is flight AA101 delayed?" or "delays from JFK"
+        # "Is flight AA101 delayed?" -> Aggregate Journey delays
         elif intent == "delay_analysis":
             if flights:
                 f_list = [f"'{f}'" for f in flights]
                 query = (
-                    f"MATCH (f:Flight)\n"
+                    f"MATCH (j:Journey)-[:ON]->(f:Flight)\n"
                     f"WHERE f.flight_number IN [{', '.join(f_list)}]\n"
-                    f"RETURN f.flight_number, f.status, f.delay_minutes, f.departure_time"
+                    f"RETURN f.flight_number, avg(j.arrival_delay_minutes) as avg_delay, max(j.arrival_delay_minutes) as max_delay"
                 )
             elif dep_code:
                 query = (
-                    f"MATCH (f:Flight)-[:ORIGIN]->(a:Airport {{code: '{dep_code}'}})\n"
-                    f"WHERE f.delay_minutes > 0\n"
-                    f"RETURN f.flight_number, f.delay_minutes, f.status ORDER BY f.delay_minutes DESC LIMIT 10"
+                    f"MATCH (j:Journey)-[:ON]->(f:Flight)-[:DEPARTS_FROM]->(a:Airport {{station_code: '{dep_code}'}})\n"
+                    f"RETURN f.flight_number, avg(j.arrival_delay_minutes) as avg_delay ORDER BY avg_delay DESC LIMIT 10"
                 )
             else:
-                 query = "MATCH (f:Flight) WHERE f.delay_minutes > 0 RETURN f LIMIT 10"
+                 query = "MATCH (j:Journey) WHERE j.arrival_delay_minutes > 0 RETURN j.arrival_delay_minutes, j.text LIMIT 10"
 
         # --- 3. Route Connectivity ---
         # "Show routes from Berlin"
         elif intent == "route_query":
             if dep_code and arr_code:
                 query = (
-                    f"MATCH (a1:Airport {{code: '{dep_code}'}})-[r:Route]-(a2:Airport {{code: '{arr_code}'}})\n"
-                    f"RETURN r, a1, a2"
+                    f"MATCH (a1:Airport {{station_code: '{dep_code}'}})<-[:DEPARTS_FROM]-(f:Flight)-[:ARRIVES_AT]->(a2:Airport {{station_code: '{arr_code}'}})\n"
+                    f"RETURN DISTINCT f.flight_number, a1.station_code, a2.station_code"
                 )
             elif dep_code:
                 query = (
-                    f"MATCH (a1:Airport {{code: '{dep_code}'}})-[:HAS_ROUTE]->(r:Route)\n"
-                    f"RETURN r LIMIT 20"
+                    f"MATCH (a1:Airport {{station_code: '{dep_code}'}})<-[:DEPARTS_FROM]-(f:Flight)-[:ARRIVES_AT]->(a2:Airport)\n"
+                    f"RETURN DISTINCT f.flight_number, a2.station_code LIMIT 20"
                 )
             else:
-                query = "MATCH (r:Route) RETURN r LIMIT 10"
+                query = "MATCH (f:Flight)-[:DEPARTS_FROM]->(a1), (f)-[:ARRIVES_AT]->(a2) RETURN DISTINCT a1.station_code, a2.station_code LIMIT 10"
 
         # --- 4. Price Query (Cheapest Flights) ---
-        # "How much is a ticket to Paris?" or "Cheapest flight JFK to LHR"
+        # Note: 'price' is NOT in the Create_kg.py CSV import (only miles, satisfaction, delay).
+        # We will fallback to returning general flight info or miles.
         elif intent == "price_query":
-            match_part = "MATCH (f:Flight)"
+             # "How many miles?"
+            match_part = "MATCH (j:Journey)"
             if dep_code:
-                match_part += f"-[:ORIGIN]->(:Airport {{code: '{dep_code}'}})"
-            if arr_code:
-                match_part += f"-[:DESTINATION]->(:Airport {{code: '{arr_code}'}})"
+                match_part += f"-[:ON]->(:Flight)-[:DEPARTS_FROM]->(:Airport {{station_code: '{dep_code}'}})"
             
             query = (
                 f"{match_part}\n"
-                f"RETURN f.flight_number, f.price, f.currency ORDER BY f.price ASC LIMIT 5"
+                f"RETURN j.actual_flown_miles ORDER BY j.actual_flown_miles ASC LIMIT 5"
             )
 
-        # --- 5. Schedule/Duration Query (Fastest/Times) ---
-        # "When does flight AA123 leave?" or "Fastest flight to NY"
+        # --- 5. Schedule/Duration Query ---
+        # No schedule data in graph. Return Journey delay stats or miles.
         elif intent == "schedule_query":
-            if "fastest" in attributes or "duration" in attributes:
-                match_part = "MATCH (f:Flight)"
-                if dep_code: match_part += f"-[:ORIGIN]->(:Airport {{code: '{dep_code}'}})"
-                if arr_code: match_part += f"-[:DESTINATION]->(:Airport {{code: '{arr_code}'}})"
-                query = f"{match_part} RETURN f.flight_number, f.duration_minutes ORDER BY f.duration_minutes ASC LIMIT 5"
-            elif flights:
-                f_list = [f"'{f}'" for f in flights]
-                query = f"MATCH (f:Flight) WHERE f.flight_number IN [{', '.join(f_list)}] RETURN f.flight_number, f.departure_time, f.arrival_time"
-            else:
-                query = "MATCH (f:Flight) RETURN f.flight_number, f.departure_time, f.arrival_time LIMIT 10"
+             query = "MATCH (j:Journey)-[:ON]->(f:Flight) RETURN f.flight_number, avg(j.number_of_legs) as avg_legs LIMIT 5"
 
-        # --- 6. Full Itinerary / Journey Details ---
-        # "Details for business class on AA101"
+        # --- 6. Journey/Quality Query ---
         elif intent == "journey_query":
-            # Focusing on cabin class or specific journey amenities
-            matches = ["MATCH (f:Flight)"]
-            if flights:
-                f_list = [f"'{f}'" for f in flights]
-                matches.append(f"WHERE f.flight_number IN [{', '.join(f_list)}]")
+            # "How is business class?"
+            match_part = "MATCH (j:Journey)"
+            where_clauses = []
+            if journeys: # e.g. "business"
+                match_part += f" WHERE j.passenger_class CONTAINS '{journeys[0]}'" # Case sensitive usually, but simpler here
             
-            # If user asks for 'business' or 'economy', we might check properties or related nodes
-            # Assuming 'class' is a property or relation. Let's assume property f.cabin_classes (list)
-            if journeys:
-                class_req = journeys[0] # e.g. "business"
-                matches.append(f"AND '{class_req}' IN f.available_classes")
-            
-            query = "\n".join(matches) + "\nRETURN f.flight_number, f.available_classes, f.amenities LIMIT 5"
+            query = f"{match_part} RETURN j.text, j.food_satisfaction_score LIMIT 5"
 
-        # --- 7. Aircraft Information ---
-        # "What plane is used for ..." (Often part of journey or general query, but let's separate standard questions)
-        # Using "general_query" or falling back if intent is vague but mentions aircraft type
-        # For now, let's map 'baggage_query' here as a distinct template or create a new 'aircraft' bucket.
-        # But per requirements, let's use:
-        elif intent == "baggage_query":
-             # "What is the baggage allowance?"
-             query = "MATCH (p:Policy {type: 'Baggage'}) RETURN p.description, p.allowance_kg LIMIT 5"
-
-        # --- 8. Passenger Satisfaction / Reviews ---
-        # "How is the food on AirFrance?"
+        # --- 7. Review/Satisfaction Query ---
         elif intent == "review_query":
-            # Assuming (f:Flight)-[:HAS_REVIEW]->(r:Review) or f.rating
-            match_part = "MATCH (f:Flight)"
-            if flights:
-                f_list = [f"'{f}'" for f in flights]
-                match_part += f" WHERE f.flight_number IN [{', '.join(f_list)}]"
-            
-            query = f"{match_part} RETURN f.flight_number, f.overall_rating, f.food_rating, f.seat_rating LIMIT 5"
+             # "How is the food?"
+            query = "MATCH (j:Journey) RETURN j.food_satisfaction_score, j.text ORDER BY j.food_satisfaction_score DESC LIMIT 5"
 
-        # --- 9. Recommendation Query (Highest Rated) ---
-        # "Recommend best flights to London"
+        # --- 8. Recommendation Query (Best Rated) ---
         elif intent == "recommendation_query":
-            match_part = "MATCH (f:Flight)"
-            if arr_code:
-                match_part += f"-[:DESTINATION]->(:Airport {{code: '{arr_code}'}})"
-            
             query = (
-                f"{match_part}\n"
-                f"WHERE f.overall_rating IS NOT NULL\n"
-                f"RETURN f.flight_number, f.overall_rating ORDER BY f.overall_rating DESC LIMIT 5"
+                "MATCH (j:Journey)-[:ON]->(f:Flight) "
+                "RETURN f.flight_number, avg(j.food_satisfaction_score) as avg_rating "
+                "ORDER BY avg_rating DESC LIMIT 5"
             )
 
-        # --- 10. Airport Amenities / Info ---
-        # "Does JFK have a lounge?" -> Mapped typically from 'general' or specific intent
-        # Let's handle generic 'flight_search' with no date/flight but specific airport as a fallback airport query
-        # OR if we have a specific 'airport_query' intent (though not in the list I saw effectively, let's overlap with route or general)
-        # Re-using 'explanation_query' or creating a catch-all for Policy/Airport if intent is vague.
-        elif intent == "policy_query":
-             query = "MATCH (pol:Policy) RETURN pol.name, pol.details LIMIT 5"
-
-        # --- Fallback / catch-all for "booking_intent" or others ---
+        # --- Fallback to Vector Search for Unmatched Intents (or generic) ---
         else:
-            # Fallback for "booking_intent" -> show available flights
-            if intent == "booking_intent":
-                 match_part = "MATCH (f:Flight {status: 'Scheduled'})"
-                 if dep_code: match_part += f"-[:ORIGIN]->(:Airport {{code: '{dep_code}'}})"
-                 if arr_code: match_part += f"-[:DESTINATION]->(:Airport {{code: '{arr_code}'}})"
-                 query = f"{match_part} RETURN f.flight_number, f.price, f.seats_available LIMIT 5"
-            else:
-                 query = "MATCH (n) RETURN n LIMIT 5"
+            # If we were processing a real NL query here we might default to vector search, 
+            # but this method returns Cypher string.
+            query = "MATCH (j:Journey) RETURN j.text LIMIT 5"
 
         return query
 
@@ -225,36 +232,46 @@ class GraphRetriever:
             return []
 
 if __name__ == "__main__":
-    # Simple test harness
-    # Requires a running Neo4j instance to return real data
-    
+    # Test Harness
     retriever = GraphRetriever()
     
-    # Test Case 1: Flight Search
+    # Test 1: Vector Search (Req 2.b)
+    user_query = "bad food and delayed flight"
+    print(f"--- Test 1: Vector Search for '{user_query}' ---")
+    vec_results = retriever.vector_search(user_query)
+    for r in vec_results:
+        print(f"[{r['score']:.4f}] {r['description'][:80]}... (Food: {r['food_rating']}, Delay: {r['delay']})")
+
+    # Test 2: Baseline Flight Search (Req 2.a)
+    # Using codes that likely exist in the sample (from walkthrough: MKX, ORX, LAX...)
     test_input_1 = {
         "intent": "flight_search",
         "entities": {
             "flights": [],
-            "airports": {"departure": "JFK", "arrival": "LHR"},
-            "dates": ["2025-05-20"]
+            "airports": {"departure": "LAX", "arrival": "ORX"}, # Guessed from previous output
+            "dates": []
         }
     }
     
-    print("--- Test Case 1: Flight Search ---")
+    print("\n--- Test 2: Baseline Flight Search (LAX -> ORX) ---")
     results_1 = retriever.run_search(test_input_1)
-    print(f"Result Count: {len(results_1)}")
+    if not results_1: 
+        print("No exact matches found (codes might differ in sample data).")
+    else:
+        for r in results_1: print(r)
 
-    # Test Case 2: Delay Analysis
+    # Test 3: Delay Analysis
     test_input_2 = {
         "intent": "delay_analysis",
         "entities": {
-            "flights": ["AA101"],
+            "flights": ["1866"], # From previous output
             "airports": {}
         }
     }
 
-    print("\n--- Test Case 2: Delay Analysis ---")
+    print("\n--- Test 3: Delay Analysis (Flight 1866) ---")
     results_2 = retriever.run_search(test_input_2)
-    print(f"Result Count: {len(results_2)}")
+    for r in results_2: print(r)
     
     retriever.close()
+
