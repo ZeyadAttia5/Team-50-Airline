@@ -118,8 +118,24 @@ st.markdown("""
     [data-testid="stSidebar"] .stMarkdown {
         color: #ffffff !important;
     }
+    [data-testid="stSidebar"] .status-green {
+        color: #22c55e !important;
+    }
     [data-testid="stSidebar"] hr {
-        border-color: #333333 !important;
+        display: block !important;
+        border: none !important;
+        border-top: 0.5px solid #888 !important;
+        margin: 1rem 0 !important;
+    }
+    /* Smaller metrics in sidebar */
+    [data-testid="stSidebar"] [data-testid="stMetric"] {
+        font-size: 0.8rem !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stMetricLabel"] {
+        font-size: 0.75rem !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stMetricValue"] {
+        font-size: 0.85rem !important;
     }
     /* Sidebar buttons styling */
     [data-testid="stSidebar"] .stButton>button {
@@ -181,15 +197,14 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] p {
         color: inherit !important;
     }
-    /* Hide all dividers */
-    hr {
+    /* Hide dividers in main content only */
+    .main hr {
         display: none !important;
     }
-    .element-container hr {
+    .main .element-container hr {
         display: none !important;
     }
-    /* Hide streamlit default separators */
-    .stMarkdown hr {
+    .main .stMarkdown hr {
         display: none !important;
     }
 </style>
@@ -214,8 +229,8 @@ with st.sidebar:
     st.markdown("### 📊 System Status")
     if st.session_state.initialized:
         st.success("✅ System Ready")
-        st.metric("Knowledge Graph", "Connected")
-        st.metric("Preprocessor", "Active")
+        st.markdown("<p style='font-size:17px; margin: 4px 0;'>Knowledge Graph: <strong class='status-green'>Connected</strong></p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size: 17px; margin: 4px 0;'>Preprocessor: <strong class='status-green'>Active</strong></p>", unsafe_allow_html=True)
     else:
         st.error("❌ System Error")
         st.error(st.session_state.get('error', 'Unknown error'))
@@ -486,4 +501,4 @@ with col1:
 with col2:
     st.markdown("**Team 50 - Airline Theme**")
 with col3:
-    st.markdown("**Graph-RAG System**")
+    st.markdown("**RAG System**")
