@@ -181,13 +181,16 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] p {
         color: inherit !important;
     }
-    /* Hide dividers after results */
-    .element-container + hr {
-        display: none;
-    }
+    /* Hide all dividers */
     hr {
-        margin: 0.5rem 0;
-        border-color: #e5e7eb;
+        display: none !important;
+    }
+    .element-container hr {
+        display: none !important;
+    }
+    /* Hide streamlit default separators */
+    .stMarkdown hr {
+        display: none !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -256,7 +259,7 @@ with st.sidebar:
     )
 
 # Main content
-st.markdown('<div class="main-header">✈️ Airline Graph-RAG Assistant</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header"><span style="background: none; -webkit-text-fill-color: currentColor;">✈️</span> Airline Graph-RAG Assistant</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-header">Airline Company Flight Insights System | Milestone 3</div>', unsafe_allow_html=True)
 
 if not st.session_state.initialized:
@@ -376,16 +379,17 @@ if search_button and query_input:
                     
                     # Display results in a nice table format
                     for idx, result in enumerate(baseline_results[:10], 1):
-                        with st.container():
-                            st.markdown(f'<div class="result-box">', unsafe_allow_html=True)
-                            st.markdown(f"<p style='color: #ffffff; margin: 0;'><strong>Result {idx}:</strong></p>", unsafe_allow_html=True)
-                            
-                            # Format the result nicely
-                            for key, value in result.items():
-                                if value is not None:
-                                    st.markdown(f"<p style='color: #ffffff; margin: 2px 0; font-size: 0.9rem;'>• <strong>{key}:</strong> {value}</p>", unsafe_allow_html=True)
-                            
-                            st.markdown('</div>', unsafe_allow_html=True)
+                        # Build complete HTML block
+                        html_content = f'<div class="result-box">'
+                        html_content += f"<p style='color: #ffffff; margin: 0;'><strong>Result {idx}:</strong></p>"
+                        
+                        # Format the result nicely
+                        for key, value in result.items():
+                            if value is not None:
+                                html_content += f"<p style='color: #ffffff; margin: 2px 0; font-size: 0.9rem;'>• <strong>{key}:</strong> {value}</p>"
+                        
+                        html_content += '</div>'
+                        st.markdown(html_content, unsafe_allow_html=True)
                     
                     if len(baseline_results) > 10:
                         st.info(f"Showing first 10 of {len(baseline_results)} results")
@@ -405,25 +409,13 @@ if search_button and query_input:
                     st.markdown(f"<p style='color: #ffffff; background-color: #1a1a1a; padding: 8px 12px; border-radius: 4px; margin-bottom: 8px;'><strong>Found {len(embedding_results)} similar journeys:</strong></p>", unsafe_allow_html=True)
                     
                     for idx, result in enumerate(embedding_results, 1):
-                        with st.container():
-                            st.markdown(f'<div class="result-box">', unsafe_allow_html=True)
-                            
-                            col1, col2 = st.columns([3, 1])
-                            with col1:
-                                st.markdown(f"<p style='color: #ffffff; margin: 0; font-size: 0.9rem;'><strong>Journey {idx}:</strong> {result.get('description', 'N/A')[:150]}...</p>", unsafe_allow_html=True)
-                            with col2:
-                                similarity = result.get('score', 0)
-                                st.metric("Similarity", f"{similarity:.3f}")
-                            
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.markdown(f"<p style='color: #ffffff; margin: 4px 0; font-size: 0.85rem;'><strong>Food Rating:</strong> {result.get('food_rating', 'N/A')}/5</p>", unsafe_allow_html=True)
-                            with col2:
-                                st.markdown(f"<p style='color: #ffffff; margin: 4px 0; font-size: 0.85rem;'><strong>Delay:</strong> {result.get('delay', 'N/A')} min</p>", unsafe_allow_html=True)
-                            with col3:
-                                st.markdown(f"<p style='color: #ffffff; margin: 4px 0; font-size: 0.85rem;'><strong>ID:</strong> {result.get('id', 'N/A')}</p>", unsafe_allow_html=True)
-                            
-                            st.markdown('</div>', unsafe_allow_html=True)
+                        # Build complete HTML block
+                        similarity = result.get('score', 0)
+                        html_content = f'<div class="result-box">'
+                        html_content += f"<p style='color: #ffffff; margin: 0; font-size: 0.9rem;'><strong>Journey {idx}:</strong> {result.get('description', 'N/A')[:150]}... <span style='float: right; color: #7c3aed;'>Similarity: {similarity:.3f}</span></p>"
+                        html_content += f"<p style='color: #ffffff; margin: 4px 0; font-size: 0.85rem;'><strong>Food Rating:</strong> {result.get('food_rating', 'N/A')}/5 | <strong>Delay:</strong> {result.get('delay', 'N/A')} min | <strong>ID:</strong> {result.get('id', 'N/A')}</p>"
+                        html_content += '</div>'
+                        st.markdown(html_content, unsafe_allow_html=True)
                     
                     # Download option
                     st.download_button(
