@@ -8,6 +8,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     from input_preprocessor import InputPreprocessor
     from graph_retrieval import GraphRetriever
+    from llm_layer import LLMLayer
 except ImportError as e:
     print(f"Error importing modules: {e}")
     sys.exit(1)
@@ -28,6 +29,13 @@ def main():
         print("Graph Retriever initialized.")
     except Exception as e:
         print(f"Failed to initialize Graph Retriever: {e}")
+        return
+
+    try:
+        llm_layer = LLMLayer()
+        print("LLM Layer initialized.")
+    except Exception as e:
+        print(f"Failed to initialize LLM Layer: {e}")
         return
 
 
@@ -52,12 +60,22 @@ def main():
             results = retriever.run_search(structured_data)
             print(f"   -> Found {len(results)} records.")
 
-            # --- Step 3: Response (Raw Output) ---
-            print(f"\n[3] Results Found: {len(results)}")
+            # --- Step 3: Display Raw Results ---
+            print(f"\n[3] Raw KG Results: {len(results)} records")
             if results:
-                print(json.dumps(results, indent=2, default=str))
+                print(json.dumps(results[:3], indent=2, default=str))  # Show first 3
+                if len(results) > 3:
+                    print(f"   ... and {len(results) - 3} more")
             else:
                 print("No results found.")
+
+            # --- Step 4: LLM Layer (Part 3) ---
+            if results:
+                print("\n[4] Querying LLMs for final answer...")
+                comparison = llm_layer.compare_models(user_query, results)
+                llm_layer.print_comparison(comparison)
+            else:
+                print("\n[4] Skipping LLM layer (no KG results to process)")
                 
         except KeyboardInterrupt:
             break
