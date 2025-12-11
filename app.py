@@ -259,7 +259,7 @@ with st.sidebar:
     )
 
 # Main content
-st.markdown('<div class="main-header"><span style="background: none; -webkit-text-fill-color: currentColor;">✈️</span> Airline Graph-RAG Assistant</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header"><span style="background: none; -webkit-text-fill-color: currentColor;">✈️</span> Airline RAG Assistant</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-header">Airline Company Flight Insights System | Milestone 3</div>', unsafe_allow_html=True)
 
 if not st.session_state.initialized:
