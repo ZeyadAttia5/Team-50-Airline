@@ -62,9 +62,56 @@ Team-50-Airline/
 
 ## Requirements
 - Python 3.8 or higher
-(Optional for LLM-based classification)
-- Ollama installed
-- A local model (model_name="llama3.2:3b")
+- Neo4j Desktop (with database running on `neo4j://127.0.0.1:7687`)
+- Required packages: `neo4j`, `groq`, `python-dotenv`, `sentence-transformers`
+- Groq API key (set in `.env` file as `GROQ_API_KEY`)
+
+## Setup Instructions
+
+1. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Configure Neo4j:**
+   - Start Neo4j Desktop and create/start a database
+   - Update `config.txt` with your Neo4j credentials:
+     ```
+     URI=neo4j://127.0.0.1:7687
+     USERNAME=neo4j
+     PASSWORD=your_password
+     ```
+
+3. **Set up Groq API:**
+   - Create a `.env` file with your Groq API key:
+     ```
+     GROQ_API_KEY=your_api_key_here
+     ```
 
 ## To Run
-- python input_preprocessor.py
+
+**Important: Run in this order!**
+
+1. **First, create the Knowledge Graph:**
+   ```bash
+   python Create_kg.py
+   ```
+   This will:
+   - Load the CSV data
+   - Generate embeddings for all journeys
+   - Populate Neo4j with nodes and relationships
+   - Takes 5-7 minutes on first run
+
+2. **Then, run the application:**
+   
+   **Option A - Streamlit UI (Recommended):**
+   ```bash
+   streamlit run app.py
+   ```
+   This will open a web interface at `http://localhost:8501`
+   
+   **Option B - Command Line:**
+   ```bash
+   python main.py
+   ```
+   This will start the interactive query system in the terminal

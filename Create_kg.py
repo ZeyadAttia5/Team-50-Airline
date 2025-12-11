@@ -105,8 +105,10 @@ def create_knowledge_graph(uri, username, password, csv_path):
             rows = []
             with open(csv_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
+                # Strip whitespace from all column names and values
                 for row in reader:
-                    rows.append(row)
+                    cleaned_row = {key.strip(): value.strip() for key, value in row.items()}
+                    rows.append(cleaned_row)
 
             print(f"Found {len(rows)} records to process.")
 
