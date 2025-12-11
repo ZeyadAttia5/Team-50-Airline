@@ -45,7 +45,8 @@ def main():
             # --- Step 1: Pre-processing (Task 1) ---
             print("\n[1] Processing Query...")
             structured_data = preprocessor.process_query(user_query)
-            
+            print(json.dumps(structured_data, indent=2))
+
             # --- Step 2: Graph Retrieval (Task 2 - Baseline) ---
             print("\n[2] Generating Cypher & Retrieving...")
             results = retriever.run_search(structured_data)

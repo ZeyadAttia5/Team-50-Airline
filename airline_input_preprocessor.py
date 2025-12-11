@@ -71,7 +71,7 @@ class AirlineInputPreprocessor:
         }
 
     # ---------- Main Processing Function ----------
-    def process_query(self, text: str) -> dict:
+    def process_query_keyword(self, text: str) -> dict:
         intent = self.classify_intent(text)
         entities = self.extract_entities(text)
 
@@ -87,7 +87,7 @@ if __name__ == "__main__":
 
     user_query = input("Enter your airline query: ")
 
-    result = processor.process_query(user_query)
+    result = processor.process_query_keyword(user_query)
 
     print("\n--- Parsed Output ---")
     print(json.dumps(result, indent=4))
