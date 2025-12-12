@@ -45,21 +45,27 @@ class InputPreprocessor:
             Classify the user’s intent into EXACTLY ONE of the following categories:
 
             - flight_search → User wants to find available flights
-            - booking_intent → User expresses desire to book or reserve a flight
             - delay_analysis → User asks about delays, cancellations, or on-time performance
+            - entity_search → User explicitly requests extraction of entities (NER) from the query; the model should return only the requested entities in the JSON schema.
             - route_query → User asks about airline routes or connectivity
             - comparison_query → User wants to compare flights, airlines, routes, or airports
             - recommendation_query → User asks for recommended or best options
-            - price_query → User asks about ticket prices or cost-related information
             - schedule_query → User asks about departure/arrival times or schedules
             - passenger_query → User asks about passengers or travel experience
-            - baggage_query → User asks about baggage allowances or policies
-            - policy_query → User asks about airline rules, policies, or regulations
             - journey_query → User asks about journey details (class, food, comfort, duration)
-            - review_query → User asks about reviews or passenger feedback
             - filter_query → User applies filters like nonstop, cheapest, fastest, best comfort
-            - explanation_query → User asks for definitions or clarifications
-            - general_query → Airline-related questions that do not match other categories
+
+            If the classified intent is "entity_search", ONLY extract the following entity types and populate the JSON exactly as shown in the Output Format. Do not invent values. For clarity, these entities are:
+
+            - Flights → Flight numbers (e.g., "AA101", "EK202")
+            - Airports → IATA codes or full airport names (e.g., "JFK", "Heathrow"); assign to airports.departure and airports.arrival when applicable
+            - Passengers → traveller types (e.g., "business", "family", "solo", "economy traveler")
+            - Journeys → trip properties like class ("economy"/"business"/"first"), comfort, food, seat, duration
+            - Routes → route strings like "JFK–LAX" or "London–Paris"
+            - Dates → travel dates or time references (e.g., "tomorrow", "next week", "2025-01-20")
+            - Attributes → single-word or short-phrase attributes like "delay", "price", "cheapest", "fastest", "comfort", "service", "nonstop"
+
+            When intent == "entity_search", prefer exact tokens from the user; if an entity is not present, return an empty list or null (for airports.departure/arrival). Do NOT return explanatory text — respond ONLY with the required JSON.
 
             Choose the most accurate intent based on the meaning of the query, not only keywords.
 
