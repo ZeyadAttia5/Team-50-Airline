@@ -14,6 +14,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from input_preprocessor import InputPreprocessor
 from graph_retrieval import GraphRetriever
+from llm_layer import LLMLayer
 
 # Page configuration
 st.set_page_config(
@@ -215,6 +216,7 @@ if 'preprocessor' not in st.session_state:
     try:
         st.session_state.preprocessor = InputPreprocessor()
         st.session_state.retriever = GraphRetriever()
+        st.session_state.llm_layer = LLMLayer()
         st.session_state.initialized = True
     except Exception as e:
         st.session_state.initialized = False
@@ -231,6 +233,7 @@ with st.sidebar:
         st.success("✅ System Ready")
         st.markdown("<p style='font-size:17px; margin: 4px 0;'>Knowledge Graph: <strong class='status-green'>Connected</strong></p>", unsafe_allow_html=True)
         st.markdown("<p style='font-size: 17px; margin: 4px 0;'>Preprocessor: <strong class='status-green'>Active</strong></p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size: 17px; margin: 4px 0;'>LLM Layer: <strong class='status-green'>Active</strong></p>", unsafe_allow_html=True)
     else:
         st.error("❌ System Error")
         st.error(st.session_state.get('error', 'Unknown error'))
@@ -264,14 +267,22 @@ with st.sidebar:
         help="Choose how to retrieve information from the Knowledge Graph"
     )
     
-    # LLM Model Selection (Placeholder)
-    st.markdown("### 🤖 LLM Model (Coming Soon)")
-    llm_model = st.selectbox(
-        "Select LLM Model",
-        ["Gemma-2-2b", "Llama-3.3-70b", "Mistral-7b"],
-        disabled=True,
-        help="LLM integration pending - will be available soon"
+    # LLM Model Selection
+    st.markdown("### 🤖 LLM Model")
+    compare_models = st.checkbox(
+        "Compare All Models",
+        value=True,
+        help="Compare responses from all 3 LLM models"
     )
+
+    if not compare_models:
+        llm_model = st.selectbox(
+            "Select Single Model",
+            ["llama-3.3-70b", "llama-3.1-8b", "qwen-3-32b"],
+            help="Choose which LLM model to use for generating answers"
+        )
+    else:
+        llm_model = "all"
 
 # Main content
 st.markdown('<div class="main-header"><span style="background: none; -webkit-text-fill-color: currentColor;">✈️</span> Airline RAG Assistant</div>', unsafe_allow_html=True)
@@ -442,38 +453,77 @@ if search_button and query_input:
                 else:
                     st.info("No embedding results to display")
             
-            # Step 4: LLM Response (Placeholder)
+            # Step 4: LLM Response
             st.markdown('<div class="section-header"><h3>🤖 Step 4: LLM-Generated Answer</h3></div>', unsafe_allow_html=True)
-            
-            st.markdown('<div class="placeholder-box">', unsafe_allow_html=True)
-            st.markdown("### 🚧 LLM Integration - Coming Soon")
-            st.markdown("""
-            **What will happen here:**
-            1. The retrieved context from Steps 2-3 will be combined
-            2. A structured prompt will be created with:
-               - **Context:** KG results (baseline + embeddings)
-               - **Persona:** "You are an airline insights assistant"
-               - **Task:** "Answer the question using only the provided data"
-            3. Multiple LLM models will generate answers (Gemma, Llama, Mistral)
-            4. Responses will be compared for quality and accuracy
-            
-            **Current Status:** Waiting for LLM layer implementation
-            """)
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Placeholder for LLM response
-            with st.expander("💡 Example LLM Response (Mock)"):
-                st.markdown("""
-                **Mock Answer:**
-                
-                Based on the Knowledge Graph data:
-                - Found {} flight records matching your query
-                - Average delay: [To be calculated]
-                - Most common route: [To be determined]
-                - Passenger satisfaction: [To be analyzed]
-                
-                *This is a placeholder. Actual LLM will provide detailed, context-aware answers.*
-                """.format(len(baseline_results)))
+
+            # Combine results for LLM context
+            combined_results = baseline_results if baseline_results else embedding_results
+
+            if combined_results:
+                with st.spinner("🤖 Querying LLM models..."):
+                    try:
+                        # Get LLM comparison
+                        comparison = st.session_state.llm_layer.compare_models(
+                            query_input,
+                            baseline_results,
+                            embedding_results if embedding_results else None
+                        )
+
+                        # Display based on user selection
+                        if llm_model == "all":
+                            # Show all models comparison
+                            st.markdown("### 📊 Multi-Model Comparison")
+
+                            # Create tabs for each model
+                            model_tabs = st.tabs([r["model"] for r in comparison["model_responses"]])
+
+                            for tab, response in zip(model_tabs, comparison["model_responses"]):
+                                with tab:
+                                    if response["success"]:
+                                        st.markdown(f"**Response Time:** {response['response_time']}s")
+                                        if response['tokens_used']:
+                                            st.markdown(f"**Tokens Used:** {response['tokens_used']}")
+                                        st.markdown("---")
+                                        st.markdown(response["answer"])
+                                    else:
+                                        st.error(f"❌ Error: {response['answer']}")
+
+                            # Show comparison metrics
+                            with st.expander("📊 Model Performance Metrics"):
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Avg Response Time", f"{comparison['summary']['avg_response_time']}s")
+                                with col2:
+                                    st.metric("Total Tokens", comparison['summary']['total_tokens'])
+                                with col3:
+                                    st.metric("Success Rate", f"{comparison['summary']['successful_responses']}/{comparison['summary']['total_models']}")
+
+                        else:
+                            # Show single model response
+                            st.markdown(f"### 🤖 Answer from {llm_model}")
+
+                            # Find the selected model's response
+                            for response in comparison["model_responses"]:
+                                if response["model"] == llm_model:
+                                    if response["success"]:
+                                        col1, col2 = st.columns(2)
+                                        with col1:
+                                            st.metric("Response Time", f"{response['response_time']}s")
+                                        with col2:
+                                            if response['tokens_used']:
+                                                st.metric("Tokens Used", response['tokens_used'])
+
+                                        st.markdown("---")
+                                        st.markdown(response["answer"])
+                                    else:
+                                        st.error(f"❌ Error: {response['answer']}")
+                                    break
+
+                    except Exception as e:
+                        st.error(f"❌ Error generating LLM response: {str(e)}")
+                        st.exception(e)
+            else:
+                st.warning("⚠️ No context available for LLM. Please retrieve some results first.")
             
             # Save to history
             st.session_state.query_history.append({
