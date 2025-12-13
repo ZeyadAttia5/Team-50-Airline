@@ -23,9 +23,9 @@ class LLMLayer:
 
         # Three different models for comparison
         self.models = {
-            "llama-3.3-70b": "llama-3.3-70b-versatile",        # Meta Llama 3.3 (70B)
-            "llama-3.1-8b": "llama-3.1-8b-instant",            # Meta Llama 3.1 (8B)
-            "qwen-3-32b": "qwen/qwen3-32b"                     # Alibaba Qwen 3 (32B)
+            "llama-3.3-70b": "llama-3.3-70b-versatile",                      # Meta Llama 3.3 (70B)
+            "llama-3.1-8b": "llama-3.1-8b-instant",                          # Meta Llama 3.1 (8B)
+            "llama-4-maverick": "meta-llama/llama-4-maverick-17b-128e-instruct"  # Meta Llama 4 (17B)
         }
 
         # Persona for airline assistant

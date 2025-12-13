@@ -29,9 +29,9 @@ The system integrates four main components:
 
 ### ✅ Part 3: LLM Layer
 - **Multi-Model Comparison**: Queries 3 different LLMs simultaneously
-  - Llama 3.3 70B (Meta) - Most capable
-  - Llama 3.1 8B (Meta) - Fastest
-  - Qwen 3 32B (Alibaba) - Balanced
+  - Llama 3.3 70B (Meta) - Most capable, largest model
+  - Llama 3.1 8B (Meta) - Fastest, smallest model
+  - Llama 4 Maverick 17B (Meta) - Latest generation, balanced
 - **Structured Prompts**: Context + Persona + Task format
 - **Performance Metrics**: Response time, token usage, success rate tracking
 - **Qualitative & Quantitative Analysis**: Compare model quality and speed
@@ -176,7 +176,7 @@ Interactive terminal-based query system
 ### LLM Models
 1. **Llama 3.3 70B** - Best for complex analysis and detailed answers
 2. **Llama 3.1 8B** - Fastest responses, good for simple queries
-3. **Qwen 3 32B** - Balanced performance and quality
+3. **Llama 4 Maverick 17B** - Latest generation, direct answers without thinking process
 
 ### Retrieval Methods
 - **Baseline (Cypher)**: Structured queries using exact matches
@@ -220,7 +220,7 @@ pip install streamlit
 - **LLM Response Time**:
   - Llama 3.3 70B: ~0.5-2s
   - Llama 3.1 8B: ~0.3-0.8s
-  - Qwen 3 32B: ~0.5-1.5s
+  - Llama 4 Maverick 17B: ~0.4-1.2s
 
 ---
 
@@ -241,7 +241,7 @@ pip install streamlit
 
 - **Language**: Python 3.11
 - **Database**: Neo4j (Graph Database)
-- **LLM Provider**: GROQ (Llama, Qwen models)
+- **LLM Provider**: GROQ (Llama 3.3, 3.1, 4 Maverick models)
 - **Embeddings**: Sentence-Transformers (all-MiniLM-L6-v2, paraphrase-MiniLM-L3-v2)
 - **UI Framework**: Streamlit
 - **Vector Search**: Neo4j Vector Index
@@ -261,7 +261,7 @@ pip install streamlit
 | **3. LLM Layer** | ✅ | `llm_layer.py` |
 | - Combine results | ✅ | Merges baseline + embeddings |
 | - Structured prompts | ✅ | Context + Persona + Task |
-| - Compare 3+ models | ✅ | Llama 3.3, 3.1, Qwen 3 |
+| - Compare 3+ models | ✅ | Llama 3.3 70B, 3.1 8B, 4 Maverick 17B |
 | - Quantitative metrics | ✅ | Time, tokens, success rate |
 | - Qualitative analysis | ✅ | Answer quality comparison |
 | **4. UI (Streamlit)** | ✅ | `app.py` |

@@ -278,7 +278,7 @@ with st.sidebar:
     if not compare_models:
         llm_model = st.selectbox(
             "Select Single Model",
-            ["llama-3.3-70b", "llama-3.1-8b", "qwen-3-32b"],
+            ["llama-3.3-70b", "llama-3.1-8b", "llama-4-maverick"],
             help="Choose which LLM model to use for generating answers"
         )
     else:
