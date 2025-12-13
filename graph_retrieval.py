@@ -121,80 +121,138 @@ class GraphRetriever:
         # --- 1. Flight Search (Standard) ---
         # "Find flights from JFK to LHR"
         if intent == "flight_search":
-            match_clauses = ["MATCH (f:Flight)"]
+            # Always include Journey for aggregations
+            match_clauses = ["MATCH (j:Journey)-[:ON]->(f:Flight)"]
             where_clauses = []
 
+            # Match airports
             if dep_code:
                 match_clauses.append(f"MATCH (f)-[:DEPARTS_FROM]->(origin:Airport {{station_code: '{dep_code}'}})")
+            else:
+                match_clauses.append("MATCH (f)-[:DEPARTS_FROM]->(origin:Airport)")
+
             if arr_code:
                 match_clauses.append(f"MATCH (f)-[:ARRIVES_AT]->(dest:Airport {{station_code: '{arr_code}'}})")
+            else:
+                match_clauses.append("MATCH (f)-[:ARRIVES_AT]->(dest:Airport)")
 
             # Apply attribute filters
             if "nonstop" in attributes or "direct" in attributes:
-                match_clauses.append("MATCH (j:Journey)-[:ON]->(f)")
                 where_clauses.append("j.number_of_legs = 1")
 
             query = "\n".join(match_clauses)
             if where_clauses:
                 query += "\nWHERE " + " AND ".join(where_clauses)
-            query += "\nRETURN DISTINCT f.flight_number, f.fleet_type_description LIMIT 10"
+
+            # Return comprehensive flight data with route and metrics
+            query += (
+                "\nRETURN DISTINCT f.flight_number, f.fleet_type_description, "
+                "origin.station_code as origin, dest.station_code as destination, "
+                "avg(j.arrival_delay_minutes) as avg_delay, "
+                "avg(j.food_satisfaction_score) as avg_rating, "
+                "count(j) as review_count "
+                "ORDER BY avg_delay ASC LIMIT 10"
+            )
 
         # --- 2. Delay Analysis ---
         # "Is flight AA101 delayed?" or "Show delays from JFK"
         elif intent == "delay_analysis":
             if flights:
+                # Specific flight delay analysis with route info
                 f_list = [f"'{f}'" for f in flights]
                 query = (
                     f"MATCH (j:Journey)-[:ON]->(f:Flight)\n"
+                    f"MATCH (f)-[:DEPARTS_FROM]->(origin:Airport)\n"
+                    f"MATCH (f)-[:ARRIVES_AT]->(dest:Airport)\n"
                     f"WHERE f.flight_number IN [{', '.join(f_list)}]\n"
-                    f"RETURN f.flight_number, avg(j.arrival_delay_minutes) as avg_delay, "
-                    f"max(j.arrival_delay_minutes) as max_delay, min(j.arrival_delay_minutes) as min_delay, "
+                    f"RETURN f.flight_number, f.fleet_type_description, "
+                    f"origin.station_code as origin, dest.station_code as destination, "
+                    f"avg(j.arrival_delay_minutes) as avg_delay, "
+                    f"max(j.arrival_delay_minutes) as max_delay, "
+                    f"min(j.arrival_delay_minutes) as min_delay, "
+                    f"avg(j.food_satisfaction_score) as avg_rating, "
                     f"count(j) as journey_count"
                 )
             elif dep_code or arr_code:
+                # Route-based delay analysis
                 match_parts = ["MATCH (j:Journey)-[:ON]->(f:Flight)"]
                 if dep_code:
-                    match_parts.append(f"MATCH (f)-[:DEPARTS_FROM]->(a:Airport {{station_code: '{dep_code}'}})")
+                    match_parts.append(f"MATCH (f)-[:DEPARTS_FROM]->(origin:Airport {{station_code: '{dep_code}'}})")
+                else:
+                    match_parts.append("MATCH (f)-[:DEPARTS_FROM]->(origin:Airport)")
+
                 if arr_code:
-                    match_parts.append(f"MATCH (f)-[:ARRIVES_AT]->(a:Airport {{station_code: '{arr_code}'}})")
+                    match_parts.append(f"MATCH (f)-[:ARRIVES_AT]->(dest:Airport {{station_code: '{arr_code}'}})")
+                else:
+                    match_parts.append("MATCH (f)-[:ARRIVES_AT]->(dest:Airport)")
+
                 query = (
                     f"{chr(10).join(match_parts)}\n"
-                    f"RETURN f.flight_number, avg(j.arrival_delay_minutes) as avg_delay "
+                    f"RETURN f.flight_number, origin.station_code as origin, dest.station_code as destination, "
+                    f"avg(j.arrival_delay_minutes) as avg_delay, avg(j.food_satisfaction_score) as avg_rating "
                     f"ORDER BY avg_delay DESC LIMIT 10"
                 )
             else:
-                query = "MATCH (j:Journey) WHERE j.arrival_delay_minutes > 0 RETURN j.arrival_delay_minutes, j.text LIMIT 10"
+                # General delay query with route context
+                query = (
+                    "MATCH (j:Journey)-[:ON]->(f:Flight)-[:DEPARTS_FROM]->(origin:Airport), "
+                    "(f)-[:ARRIVES_AT]->(dest:Airport) "
+                    "WHERE j.arrival_delay_minutes > 0 "
+                    "RETURN f.flight_number, origin.station_code as origin, dest.station_code as destination, "
+                    "j.arrival_delay_minutes as delay, j.food_satisfaction_score as rating, j.text LIMIT 10"
+                )
 
         # --- 3. Route Connectivity ---
         # "Show routes from Berlin" or "Routes between JFK and LAX"
         elif intent == "route_query":
             if dep_code and arr_code:
+                # Specific route with metrics
                 query = (
-                    f"MATCH (a1:Airport {{station_code: '{dep_code}'}})<-[:DEPARTS_FROM]-(f:Flight)-[:ARRIVES_AT]->(a2:Airport {{station_code: '{arr_code}'}})\n"
-                    f"RETURN DISTINCT f.flight_number, a1.station_code as origin, a2.station_code as destination, "
-                    f"f.fleet_type_description as aircraft"
+                    f"MATCH (j:Journey)-[:ON]->(f:Flight)-[:DEPARTS_FROM]->(origin:Airport {{station_code: '{dep_code}'}}), "
+                    f"(f)-[:ARRIVES_AT]->(dest:Airport {{station_code: '{arr_code}'}})\n"
+                    f"RETURN DISTINCT f.flight_number, origin.station_code as origin, dest.station_code as destination, "
+                    f"f.fleet_type_description as aircraft, "
+                    f"avg(j.arrival_delay_minutes) as avg_delay, "
+                    f"avg(j.food_satisfaction_score) as avg_rating, "
+                    f"count(j) as review_count "
+                    f"ORDER BY avg_rating DESC LIMIT 20"
                 )
             elif dep_code:
+                # Routes from origin with metrics
                 query = (
-                    f"MATCH (a1:Airport {{station_code: '{dep_code}'}})<-[:DEPARTS_FROM]-(f:Flight)-[:ARRIVES_AT]->(a2:Airport)\n"
-                    f"RETURN DISTINCT f.flight_number, a2.station_code as destination LIMIT 20"
+                    f"MATCH (j:Journey)-[:ON]->(f:Flight)-[:DEPARTS_FROM]->(origin:Airport {{station_code: '{dep_code}'}}), "
+                    f"(f)-[:ARRIVES_AT]->(dest:Airport)\n"
+                    f"RETURN DISTINCT f.flight_number, dest.station_code as destination, f.fleet_type_description, "
+                    f"avg(j.arrival_delay_minutes) as avg_delay, avg(j.food_satisfaction_score) as avg_rating "
+                    f"ORDER BY avg_rating DESC LIMIT 20"
                 )
             elif arr_code:
+                # Routes to destination with metrics
                 query = (
-                    f"MATCH (a1:Airport)<-[:DEPARTS_FROM]-(f:Flight)-[:ARRIVES_AT]->(a2:Airport {{station_code: '{arr_code}'}})\n"
-                    f"RETURN DISTINCT f.flight_number, a1.station_code as origin LIMIT 20"
+                    f"MATCH (j:Journey)-[:ON]->(f:Flight)-[:DEPARTS_FROM]->(origin:Airport), "
+                    f"(f)-[:ARRIVES_AT]->(dest:Airport {{station_code: '{arr_code}'}})\n"
+                    f"RETURN DISTINCT f.flight_number, origin.station_code as origin, f.fleet_type_description, "
+                    f"avg(j.arrival_delay_minutes) as avg_delay, avg(j.food_satisfaction_score) as avg_rating "
+                    f"ORDER BY avg_rating DESC LIMIT 20"
                 )
             else:
-                query = "MATCH (f:Flight)-[:DEPARTS_FROM]->(a1), (f)-[:ARRIVES_AT]->(a2) RETURN DISTINCT a1.station_code as origin, a2.station_code as destination LIMIT 20"
+                # All routes overview
+                query = (
+                    "MATCH (f:Flight)-[:DEPARTS_FROM]->(origin:Airport), (f)-[:ARRIVES_AT]->(dest:Airport) "
+                    "RETURN DISTINCT origin.station_code as origin, dest.station_code as destination, "
+                    "count(DISTINCT f) as flight_count LIMIT 20"
+                )
 
         # --- 4. Comparison Query ---
         # "Compare flights from JFK to LAX" or "Compare airlines on this route"
         elif intent == "comparison_query":
             if dep_code and arr_code:
+                # Route-specific comparison with full context
                 query = (
-                    f"MATCH (j:Journey)-[:ON]->(f:Flight)-[:DEPARTS_FROM]->(a1:Airport {{station_code: '{dep_code}'}}), "
-                    f"(f)-[:ARRIVES_AT]->(a2:Airport {{station_code: '{arr_code}'}})\n"
+                    f"MATCH (j:Journey)-[:ON]->(f:Flight)-[:DEPARTS_FROM]->(origin:Airport {{station_code: '{dep_code}'}}), "
+                    f"(f)-[:ARRIVES_AT]->(dest:Airport {{station_code: '{arr_code}'}})\n"
                     f"RETURN f.flight_number, f.fleet_type_description, "
+                    f"origin.station_code as origin, dest.station_code as destination, "
                     f"avg(j.food_satisfaction_score) as avg_rating, "
                     f"avg(j.arrival_delay_minutes) as avg_delay, "
                     f"avg(j.actual_flown_miles) as avg_miles, "
@@ -202,23 +260,29 @@ class GraphRetriever:
                     f"ORDER BY avg_rating DESC LIMIT 10"
                 )
             elif flights and len(flights) > 1:
+                # Multi-flight comparison with routes
                 f_list = [f"'{f}'" for f in flights]
                 query = (
                     f"MATCH (j:Journey)-[:ON]->(f:Flight)\n"
+                    f"MATCH (f)-[:DEPARTS_FROM]->(origin:Airport)\n"
+                    f"MATCH (f)-[:ARRIVES_AT]->(dest:Airport)\n"
                     f"WHERE f.flight_number IN [{', '.join(f_list)}]\n"
-                    f"RETURN f.flight_number, "
+                    f"RETURN f.flight_number, f.fleet_type_description, "
+                    f"origin.station_code as origin, dest.station_code as destination, "
                     f"avg(j.food_satisfaction_score) as avg_rating, "
                     f"avg(j.arrival_delay_minutes) as avg_delay, "
                     f"count(j) as reviews "
                     f"ORDER BY avg_rating DESC"
                 )
             else:
-                # Generic comparison: top flights by satisfaction
+                # Generic comparison: top flights by satisfaction with routes
                 query = (
-                    "MATCH (j:Journey)-[:ON]->(f:Flight) "
-                    "WITH f, avg(j.food_satisfaction_score) as avg_rating, avg(j.arrival_delay_minutes) as avg_delay, count(j) as reviews "
+                    "MATCH (j:Journey)-[:ON]->(f:Flight)-[:DEPARTS_FROM]->(origin:Airport), "
+                    "(f)-[:ARRIVES_AT]->(dest:Airport) "
+                    "WITH f, origin, dest, avg(j.food_satisfaction_score) as avg_rating, avg(j.arrival_delay_minutes) as avg_delay, count(j) as reviews "
                     "WHERE reviews >= 2 "
-                    "RETURN f.flight_number, avg_rating, avg_delay, reviews "
+                    "RETURN f.flight_number, f.fleet_type_description, origin.station_code as origin, dest.station_code as destination, "
+                    "avg_rating, avg_delay, reviews "
                     "ORDER BY avg_rating DESC, avg_delay ASC LIMIT 10"
                 )
 
@@ -228,10 +292,16 @@ class GraphRetriever:
             match_parts = ["MATCH (j:Journey)-[:ON]->(f:Flight)"]
             where_clauses = []
 
+            # Always match airports for complete context
             if dep_code:
-                match_parts.append(f"MATCH (f)-[:DEPARTS_FROM]->(a1:Airport {{station_code: '{dep_code}'}})")
+                match_parts.append(f"MATCH (f)-[:DEPARTS_FROM]->(origin:Airport {{station_code: '{dep_code}'}})")
+            else:
+                match_parts.append("MATCH (f)-[:DEPARTS_FROM]->(origin:Airport)")
+
             if arr_code:
-                match_parts.append(f"MATCH (f)-[:ARRIVES_AT]->(a2:Airport {{station_code: '{arr_code}'}})")
+                match_parts.append(f"MATCH (f)-[:ARRIVES_AT]->(dest:Airport {{station_code: '{arr_code}'}})")
+            else:
+                match_parts.append("MATCH (f)-[:ARRIVES_AT]->(dest:Airport)")
 
             # Filter by class if specified in journeys
             if journeys:
@@ -244,8 +314,9 @@ class GraphRetriever:
                 query += "\nWHERE " + " AND ".join(where_clauses)
 
             query += (
-                "\nWITH f, avg(j.food_satisfaction_score) as avg_rating, avg(j.arrival_delay_minutes) as avg_delay, count(j) as reviews "
-                "\nRETURN f.flight_number, f.fleet_type_description, avg_rating, avg_delay, reviews "
+                "\nWITH f, origin, dest, avg(j.food_satisfaction_score) as avg_rating, avg(j.arrival_delay_minutes) as avg_delay, count(j) as reviews "
+                "\nRETURN f.flight_number, f.fleet_type_description, origin.station_code as origin, dest.station_code as destination, "
+                "avg_rating, avg_delay, reviews "
                 "\nORDER BY avg_rating DESC, avg_delay ASC LIMIT 5"
             )
 
@@ -255,16 +326,23 @@ class GraphRetriever:
             match_parts = ["MATCH (j:Journey)-[:ON]->(f:Flight)"]
 
             if dep_code:
-                match_parts.append(f"MATCH (f)-[:DEPARTS_FROM]->(a1:Airport {{station_code: '{dep_code}'}})")
+                match_parts.append(f"MATCH (f)-[:DEPARTS_FROM]->(origin:Airport {{station_code: '{dep_code}'}})")
+            else:
+                match_parts.append("MATCH (f)-[:DEPARTS_FROM]->(origin:Airport)")
+
             if arr_code:
-                match_parts.append(f"MATCH (f)-[:ARRIVES_AT]->(a2:Airport {{station_code: '{arr_code}'}})")
+                match_parts.append(f"MATCH (f)-[:ARRIVES_AT]->(dest:Airport {{station_code: '{arr_code}'}})")
+            else:
+                match_parts.append("MATCH (f)-[:ARRIVES_AT]->(dest:Airport)")
 
             query = (
                 f"{chr(10).join(match_parts)}\n"
-                f"RETURN f.flight_number, "
+                f"RETURN f.flight_number, f.fleet_type_description, "
+                f"origin.station_code as origin, dest.station_code as destination, "
                 f"avg(j.number_of_legs) as avg_legs, "
                 f"avg(j.actual_flown_miles) as avg_miles, "
-                f"avg(j.arrival_delay_minutes) as avg_delay "
+                f"avg(j.arrival_delay_minutes) as avg_delay, "
+                f"avg(j.food_satisfaction_score) as avg_rating "
                 f"ORDER BY avg_legs ASC LIMIT 10"
             )
 
@@ -273,6 +351,17 @@ class GraphRetriever:
         elif intent == "passenger_query":
             match_parts = ["MATCH (p:Passenger)-[:TOOK]->(j:Journey)-[:ON]->(f:Flight)"]
             where_clauses = []
+
+            # Always match airports for route context
+            if dep_code:
+                match_parts.append(f"MATCH (f)-[:DEPARTS_FROM]->(origin:Airport {{station_code: '{dep_code}'}})")
+            else:
+                match_parts.append("MATCH (f)-[:DEPARTS_FROM]->(origin:Airport)")
+
+            if arr_code:
+                match_parts.append(f"MATCH (f)-[:ARRIVES_AT]->(dest:Airport {{station_code: '{arr_code}'}})")
+            else:
+                match_parts.append("MATCH (f)-[:ARRIVES_AT]->(dest:Airport)")
 
             # Filter by loyalty level if mentioned in passengers
             if passengers:
@@ -284,18 +373,15 @@ class GraphRetriever:
                     elif "economy" in p_attr.lower():
                         where_clauses.append("toLower(j.passenger_class) = 'economy'")
 
-            if dep_code:
-                match_parts.append(f"MATCH (f)-[:DEPARTS_FROM]->(a1:Airport {{station_code: '{dep_code}'}})")
-            if arr_code:
-                match_parts.append(f"MATCH (f)-[:ARRIVES_AT]->(a2:Airport {{station_code: '{arr_code}'}})")
-
             query = "\n".join(match_parts)
             if where_clauses:
                 query += "\nWHERE " + " AND ".join(where_clauses)
 
             query += (
                 "\nRETURN p.loyalty_program_level, p.generation, j.passenger_class, "
-                "avg(j.food_satisfaction_score) as avg_rating, count(j) as journey_count "
+                "origin.station_code as origin, dest.station_code as destination, "
+                "avg(j.food_satisfaction_score) as avg_rating, avg(j.arrival_delay_minutes) as avg_delay, "
+                "count(j) as journey_count "
                 "ORDER BY avg_rating DESC LIMIT 10"
             )
 
@@ -305,34 +391,49 @@ class GraphRetriever:
             match_parts = ["MATCH (j:Journey)-[:ON]->(f:Flight)"]
             where_clauses = []
 
+            # Always match airports for route context
+            if dep_code:
+                match_parts.append(f"MATCH (f)-[:DEPARTS_FROM]->(origin:Airport {{station_code: '{dep_code}'}})")
+            else:
+                match_parts.append("MATCH (f)-[:DEPARTS_FROM]->(origin:Airport)")
+
+            if arr_code:
+                match_parts.append(f"MATCH (f)-[:ARRIVES_AT]->(dest:Airport {{station_code: '{arr_code}'}})")
+            else:
+                match_parts.append("MATCH (f)-[:ARRIVES_AT]->(dest:Airport)")
+
             # Filter by class or comfort attributes
             if journeys:
                 for j_attr in journeys:
                     if j_attr.lower() in ["business", "economy", "first"]:
                         where_clauses.append(f"toLower(j.passenger_class) CONTAINS '{j_attr.lower()}'")
 
-            if dep_code:
-                match_parts.append(f"MATCH (f)-[:DEPARTS_FROM]->(a1:Airport {{station_code: '{dep_code}'}})")
-            if arr_code:
-                match_parts.append(f"MATCH (f)-[:ARRIVES_AT]->(a2:Airport {{station_code: '{arr_code}'}})")
-
             query = "\n".join(match_parts)
             if where_clauses:
                 query += "\nWHERE " + " AND ".join(where_clauses)
 
-            query += "\nRETURN j.passenger_class, j.text, j.food_satisfaction_score, j.arrival_delay_minutes LIMIT 10"
+            query += (
+                "\nRETURN f.flight_number, origin.station_code as origin, dest.station_code as destination, "
+                "j.passenger_class, j.text, j.food_satisfaction_score, j.arrival_delay_minutes LIMIT 10"
+            )
 
         # --- 9. Filter Query ---
         # "Show me nonstop flights" or "Cheapest/fastest option"
         elif intent == "filter_query":
             match_parts = ["MATCH (j:Journey)-[:ON]->(f:Flight)"]
             where_clauses = []
-            order_by = "j.food_satisfaction_score DESC"
+            order_by = "avg_rating DESC"
 
+            # Always match airports for route context
             if dep_code:
-                match_parts.append(f"MATCH (f)-[:DEPARTS_FROM]->(a1:Airport {{station_code: '{dep_code}'}})")
+                match_parts.append(f"MATCH (f)-[:DEPARTS_FROM]->(origin:Airport {{station_code: '{dep_code}'}})")
+            else:
+                match_parts.append("MATCH (f)-[:DEPARTS_FROM]->(origin:Airport)")
+
             if arr_code:
-                match_parts.append(f"MATCH (f)-[:ARRIVES_AT]->(a2:Airport {{station_code: '{arr_code}'}})")
+                match_parts.append(f"MATCH (f)-[:ARRIVES_AT]->(dest:Airport {{station_code: '{arr_code}'}})")
+            else:
+                match_parts.append("MATCH (f)-[:ARRIVES_AT]->(dest:Airport)")
 
             # Apply attribute-based filters
             for attr in attributes:
@@ -340,14 +441,14 @@ class GraphRetriever:
                 if attr_lower in ["nonstop", "direct"]:
                     where_clauses.append("j.number_of_legs = 1")
                 elif attr_lower in ["cheapest", "cheap"]:
-                    order_by = "j.actual_flown_miles ASC"  # Using miles as proxy for price
+                    order_by = "avg_miles ASC"  # Using miles as proxy for price
                 elif attr_lower in ["fastest", "quick", "shortest"]:
-                    order_by = "j.number_of_legs ASC, j.actual_flown_miles ASC"
+                    order_by = "avg_legs ASC, avg_miles ASC"
                 elif attr_lower in ["best", "top", "comfort"]:
-                    order_by = "j.food_satisfaction_score DESC"
+                    order_by = "avg_rating DESC"
                 elif attr_lower in ["delay", "delayed"]:
                     where_clauses.append("j.arrival_delay_minutes > 0")
-                    order_by = "j.arrival_delay_minutes DESC"
+                    order_by = "avg_delay DESC"
 
             query = "\n".join(match_parts)
             if where_clauses:
@@ -355,6 +456,7 @@ class GraphRetriever:
 
             query += (
                 f"\nRETURN DISTINCT f.flight_number, f.fleet_type_description, "
+                f"origin.station_code as origin, dest.station_code as destination, "
                 f"avg(j.food_satisfaction_score) as avg_rating, "
                 f"avg(j.arrival_delay_minutes) as avg_delay, "
                 f"avg(j.actual_flown_miles) as avg_miles, "
@@ -368,10 +470,16 @@ class GraphRetriever:
             match_parts = ["MATCH (j:Journey)-[:ON]->(f:Flight)"]
             where_clauses = []
 
+            # Always match airports for route context
             if dep_code:
-                match_parts.append(f"MATCH (f)-[:DEPARTS_FROM]->(a1:Airport {{station_code: '{dep_code}'}})")
+                match_parts.append(f"MATCH (f)-[:DEPARTS_FROM]->(origin:Airport {{station_code: '{dep_code}'}})")
+            else:
+                match_parts.append("MATCH (f)-[:DEPARTS_FROM]->(origin:Airport)")
+
             if arr_code:
-                match_parts.append(f"MATCH (f)-[:ARRIVES_AT]->(a2:Airport {{station_code: '{arr_code}'}})")
+                match_parts.append(f"MATCH (f)-[:ARRIVES_AT]->(dest:Airport {{station_code: '{arr_code}'}})")
+            else:
+                match_parts.append("MATCH (f)-[:ARRIVES_AT]->(dest:Airport)")
 
             # Check for food/service specific mentions in attributes
             if "food" in attributes or "service" in attributes:
@@ -381,16 +489,21 @@ class GraphRetriever:
             if where_clauses:
                 query += "\nWHERE " + " AND ".join(where_clauses)
 
-            query += "\nRETURN f.flight_number, j.food_satisfaction_score, j.text ORDER BY j.food_satisfaction_score DESC LIMIT 10"
+            query += (
+                "\nRETURN f.flight_number, origin.station_code as origin, dest.station_code as destination, "
+                "j.food_satisfaction_score, j.arrival_delay_minutes as delay, j.text "
+                "ORDER BY j.food_satisfaction_score DESC LIMIT 10"
+            )
 
         # --- 11. General Query (Fallback) ---
         else:
-            # Generic query to show sample journeys
+            # Generic query to show sample journeys with full context
             query = (
-                "MATCH (j:Journey)-[:ON]->(f:Flight)-[:DEPARTS_FROM]->(a1:Airport), "
-                "(f)-[:ARRIVES_AT]->(a2:Airport) "
-                "RETURN f.flight_number, a1.station_code as origin, a2.station_code as destination, "
-                "j.food_satisfaction_score, j.text LIMIT 10"
+                "MATCH (j:Journey)-[:ON]->(f:Flight)-[:DEPARTS_FROM]->(origin:Airport), "
+                "(f)-[:ARRIVES_AT]->(dest:Airport) "
+                "RETURN f.flight_number, f.fleet_type_description, "
+                "origin.station_code as origin, dest.station_code as destination, "
+                "j.food_satisfaction_score as rating, j.arrival_delay_minutes as delay, j.text LIMIT 10"
             )
 
         return query
